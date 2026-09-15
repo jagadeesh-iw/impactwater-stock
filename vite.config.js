@@ -6,5 +6,5 @@ import react from "@vitejs/plugin-react";
 // If you deploy to a custom domain or a user/org root page, leave it as "/".
 export default defineConfig({
   plugins: [react()],
-  base: "/impact-water-stock/",
+  base: "/impactwater-stock/",
 });
