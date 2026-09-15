@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { doc, onSnapshot, setDoc, arrayUnion } from "firebase/firestore";
 import { db } from "./firebase";
-import { Plus, Minus, Package, ClipboardList, ChevronRight, ChevronLeft, X, Check, AlertTriangle, Loader2, Lock } from "lucide-react";
+import { Plus, Minus, Package, ClipboardList, ChevronRight, ChevronLeft, X, Check, AlertTriangle, Loader2, Lock, Trash2, MessageCircle, Send } from "lucide-react";
 
 const TEAL = "#0E6B64";
 const TEAL_DARK = "#0A4F4A";
@@ -68,11 +68,117 @@ function PinGate({ children }) {
   );
 }
 
+// ---------- Chat widget ----------
+function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+  const [name, setName] = useState(() => localStorage.getItem("iw_chat_name") || "");
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "impact_water", "chat"), (snap) => {
+      setMessages(snap.exists() ? snap.data().messages || [] : []);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, open]);
+
+  async function send() {
+    if (!text.trim() || !name.trim()) return;
+    localStorage.setItem("iw_chat_name", name.trim());
+    const msg = { id: uid(), text: text.trim(), name: name.trim(), ts: Date.now() };
+    setText("");
+    try {
+      await setDoc(doc(db, "impact_water", "chat"), { messages: arrayUnion(msg) }, { merge: true });
+    } catch {
+      // silently ignore — message just won't send, chat isn't critical path
+    }
+  }
+
+  return (
+    <>
+      {open && (
+        <div style={{
+          position: "fixed", bottom: 78, right: 16, width: 300, maxWidth: "calc(100vw - 32px)",
+          background: CARD, border: `1px solid ${LINE}`, borderRadius: 14, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+          display: "flex", flexDirection: "column", overflow: "hidden", zIndex: 50,
+        }}>
+          <div style={{ background: TEAL, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#fff", fontSize: 13.5, fontWeight: 700 }}>Team chat</span>
+            <button onClick={() => setOpen(false)} style={{ background: "transparent", border: "none", cursor: "pointer", padding: 2 }}>
+              <X size={16} color="#fff" />
+            </button>
+          </div>
+
+          <div style={{ height: 220, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+            {messages.length === 0 && (
+              <div style={{ fontSize: 12, color: "#9BA9A5", textAlign: "center", marginTop: 20 }}>No messages yet</div>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} style={{ fontSize: 13, color: INK, lineHeight: 1.4 }}>
+                {m.text} <span style={{ color: "#7C8F8B" }}>- {m.name}</span>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+
+          <div style={{ borderTop: `1px solid ${LINE}`, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+            <input
+              placeholder="Type a message"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              style={{ width: "100%", padding: "8px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                placeholder="Your name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && send()}
+                style={{ flex: 1, padding: "8px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}
+              />
+              <button
+                onClick={send}
+                disabled={!text.trim() || !name.trim()}
+                style={{
+                  width: 36, borderRadius: 8, border: "none",
+                  background: !text.trim() || !name.trim() ? "#B7C3C0" : TEAL,
+                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: !text.trim() || !name.trim() ? "default" : "pointer",
+                }}
+              >
+                <Send size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          position: "fixed", bottom: 20, right: 16, width: 52, height: 52, borderRadius: 26,
+          background: TEAL, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 50,
+        }}
+      >
+        {open ? <X size={22} color="#fff" /> : <MessageCircle size={22} color="#fff" />}
+      </button>
+    </>
+  );
+}
+
 // ---------- Main app ----------
 export default function App() {
   return (
     <PinGate>
       <StockPOTracker />
+      <ChatWidget />
     </PinGate>
   );
 }
@@ -178,6 +284,17 @@ function StockPOTracker() {
       x.id === p.id ? { ...x, stock: Math.max(0, x.stock + delta) } : x
     );
     saveProducts(next);
+  }
+
+  function deleteProduct(p) {
+    if (!window.confirm(`Delete "${p.name}"? This won't undo.`)) return;
+    saveProducts(products.filter((x) => x.id !== p.id));
+  }
+
+  function deleteOrder(po) {
+    if (!window.confirm(`Delete order "${po.label}"? This won't undo. Stock already deducted for it will not be restored.`)) return false;
+    saveOrders(orders.filter((o) => o.id !== po.id));
+    return true;
   }
 
   function addPoLine() {
@@ -383,6 +500,12 @@ function StockPOTracker() {
                   >
                     <Plus size={14} color={TEAL_DARK} />
                   </button>
+                  <button
+                    onClick={() => deleteProduct(p)}
+                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginLeft: 2 }}
+                  >
+                    <Trash2 size={14} color="#B7C3C0" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -426,9 +549,9 @@ function StockPOTracker() {
             const statusColor = po.status === "fulfilled" ? GOOD : po.status === "partial" ? RUST : "#8A9A96";
             const statusLabel = po.status === "fulfilled" ? "Fulfilled" : po.status === "partial" ? "Partial" : "Pending";
             return (
-              <button key={po.id} onClick={() => openPo(po)}
-                style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-                <div>
+              <div key={po.id}
+                style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button onClick={() => openPo(po)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{po.label}</div>
                   <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 2 }}>{po.date} · {po.lines.length} item{po.lines.length !== 1 ? "s" : ""}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
@@ -437,9 +560,14 @@ function StockPOTracker() {
                       <span style={{ fontSize: 10.5, fontWeight: 700, color: TEAL_DARK, background: "#DCEFEC", borderRadius: 5, padding: "2px 6px" }}>Shipped</span>
                     )}
                   </div>
-                </div>
-                <ChevronRight size={17} color="#9BA9A5" />
-              </button>
+                </button>
+                <button onClick={() => deleteOrder(po)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 6 }}>
+                  <Trash2 size={15} color="#B7C3C0" />
+                </button>
+                <button onClick={() => openPo(po)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 4 }}>
+                  <ChevronRight size={17} color="#9BA9A5" />
+                </button>
+              </div>
             );
           })}
 
@@ -490,9 +618,14 @@ function StockPOTracker() {
 
       {tab === "orders" && openPo_ && (
         <div style={{ padding: "8px 16px 0" }}>
-          <button onClick={() => setOpenPoId(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: TEAL_DARK, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
-            <ChevronLeft size={16} /> Orders
-          </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <button onClick={() => setOpenPoId(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: TEAL_DARK, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
+              <ChevronLeft size={16} /> Orders
+            </button>
+            <button onClick={() => { if (deleteOrder(openPo_)) setOpenPoId(null); }} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: RUST, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
 
           <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>{openPo_.label}</div>
           <div style={{ fontSize: 12, color: "#7C8F8B", marginBottom: 10 }}>{openPo_.date}</div>
