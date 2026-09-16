@@ -1,0 +1,70 @@
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+button {
+  transition: transform 0.12s ease, opacity 0.12s ease, box-shadow 0.12s ease;
+}
+button:active {
+  transform: scale(0.96);
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease both;
+}
+.card-anim {
+  animation: fadeInUp 0.22s ease both;
+}
+
+/* Responsive shell: mobile-first, widens on larger screens */
+.shell {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+@media (min-width: 860px) {
+  .shell {
+    max-width: 1040px;
+  }
+}
+
+/* Card lists collapse to 1 column on mobile, auto-flow into more
+   columns as space allows on wider screens — no JS breakpoints needed. */
+.grid-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 640px) {
+  .grid-cards {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+.grid-cards > * {
+  margin-bottom: 0 !important;
+}
+
+/* Print: only the invoice print area shows when printing */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  #invoice-print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  body {
+    background: #fff !important;
+  }
+}
