@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { doc, onSnapshot, setDoc, arrayUnion } from "firebase/firestore";
 import { db } from "./firebase";
-import { Plus, Minus, Package, ClipboardList, ChevronRight, ChevronLeft, X, Check, AlertTriangle, Loader2, Lock, Trash2, MessageCircle, Send } from "lucide-react";
+import {
+  Plus, Minus, Package, ClipboardList, ChevronRight, ChevronLeft, X, Check,
+  AlertTriangle, Loader2, Lock, Trash2, MessageCircle, Send, Boxes,
+  ClipboardCheck, CheckCircle2, XCircle, CircleDashed, ShoppingBag, Factory,
+} from "lucide-react";
 
 const TEAL = "#0E6B64";
 const TEAL_DARK = "#0A4F4A";
@@ -11,9 +15,16 @@ const CARD = "#FFFFFF";
 const LINE = "#DCE5E2";
 const RUST = "#B4552E";
 const GOOD = "#2F7A52";
+const AMBER = "#B08A2E";
 
-// CHANGE THIS to whatever passcode you want the team to use.
 const TEAM_PIN = "1234";
+
+const DEFAULT_QC_CHECKS = [
+  "Visual inspection",
+  "Weight / volume check",
+  "Seal integrity",
+  "Labeling correct",
+];
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -24,7 +35,6 @@ function todayStr() {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// ---------- PIN gate ----------
 function PinGate({ children }) {
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem("iw_unlocked") === "1");
   const [pin, setPin] = useState("");
@@ -49,7 +59,7 @@ function PinGate({ children }) {
         <div style={{ width: 42, height: 42, borderRadius: 12, background: "#E7EFED", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
           <Lock size={18} color={TEAL_DARK} />
         </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: INK, marginBottom: 4 }}>Impact Water Stock</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: INK, marginBottom: 4 }}>Impact Water</div>
         <div style={{ fontSize: 12.5, color: "#7C8F8B", marginBottom: 16 }}>Enter the team passcode to continue</div>
         <input
           autoFocus
@@ -68,7 +78,6 @@ function PinGate({ children }) {
   );
 }
 
-// ---------- Chat widget ----------
 function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -95,7 +104,7 @@ function ChatWidget() {
     try {
       await setDoc(doc(db, "impact_water", "chat"), { messages: arrayUnion(msg) }, { merge: true });
     } catch {
-      // silently ignore — message just won't send, chat isn't critical path
+      // silently ignore
     }
   }
 
@@ -173,20 +182,24 @@ function ChatWidget() {
   );
 }
 
-// ---------- Main app ----------
 export default function App() {
   return (
     <PinGate>
-      <StockPOTracker />
+      <MainApp />
       <ChatWidget />
     </PinGate>
   );
 }
 
-function StockPOTracker() {
-  const [tab, setTab] = useState("stock");
-  const [products, setProducts] = useState(null); // null = loading
+function MainApp() {
+  const [section, setSection] = useState("sales");
+  const [salesTab, setSalesTab] = useState("stock");
+  const [prodTab, setProdTab] = useState("batches");
+
+  const [products, setProducts] = useState(null);
   const [orders, setOrders] = useState(null);
+  const [materials, setMaterials] = useState(null);
+  const [batches, setBatches] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -194,7 +207,6 @@ function StockPOTracker() {
   const [newName, setNewName] = useState("");
   const [newSku, setNewSku] = useState("");
   const [newStock, setNewStock] = useState("");
-
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
 
@@ -204,135 +216,111 @@ function StockPOTracker() {
   const [poLines, setPoLines] = useState([{ id: uid(), productId: "", qty: "" }]);
   const [allocDraft, setAllocDraft] = useState({});
 
-  // Realtime Firestore sync — any teammate's change shows up automatically.
+  const [addingMaterial, setAddingMaterial] = useState(false);
+  const [newMatName, setNewMatName] = useState("");
+  const [newMatUnit, setNewMatUnit] = useState("");
+  const [newMatStock, setNewMatStock] = useState("");
+  const [editingMatId, setEditingMatId] = useState(null);
+  const [editMatValue, setEditMatValue] = useState("");
+
+  const [creatingBatch, setCreatingBatch] = useState(false);
+  const [batchProduct, setBatchProduct] = useState("");
+  const [batchQty, setBatchQty] = useState("");
+  const [openBatchId, setOpenBatchId] = useState(null);
+  const [matLines, setMatLines] = useState([{ id: uid(), materialId: "", qty: "" }]);
+  const [qcDraft, setQcDraft] = useState([]);
+  const [finishedQty, setFinishedQty] = useState("");
+
   useEffect(() => {
-    const unsubInv = onSnapshot(
-      doc(db, "impact_water", "inventory"),
+    const unsubInv = onSnapshot(doc(db, "impact_water", "inventory"),
       (snap) => setProducts(snap.exists() ? snap.data().products || [] : []),
-      () => setError("Couldn't connect to the database. Check your connection and refresh.")
-    );
-    const unsubPo = onSnapshot(
-      doc(db, "impact_water", "purchase_orders"),
+      () => setError("Couldn't connect to the database. Check your connection and refresh."));
+    const unsubPo = onSnapshot(doc(db, "impact_water", "purchase_orders"),
       (snap) => setOrders(snap.exists() ? snap.data().orders || [] : []),
-      () => setError("Couldn't connect to the database. Check your connection and refresh.")
-    );
-    return () => {
-      unsubInv();
-      unsubPo();
-    };
+      () => setError("Couldn't connect to the database. Check your connection and refresh."));
+    const unsubMat = onSnapshot(doc(db, "production", "materials"),
+      (snap) => setMaterials(snap.exists() ? snap.data().materials || [] : []),
+      () => setError("Couldn't connect to the database. Check your connection and refresh."));
+    const unsubBatch = onSnapshot(doc(db, "production", "batches"),
+      (snap) => setBatches(snap.exists() ? snap.data().batches || [] : []),
+      () => setError("Couldn't connect to the database. Check your connection and refresh."));
+    return () => { unsubInv(); unsubPo(); unsubMat(); unsubBatch(); };
   }, []);
 
   const saveProducts = useCallback(async (next) => {
     setProducts(next);
     setSaving(true);
-    try {
-      await setDoc(doc(db, "impact_water", "inventory"), { products: next });
-      setError("");
-    } catch {
-      setError("Couldn't save stock changes. Check your connection and try again.");
-    } finally {
-      setSaving(false);
-    }
+    try { await setDoc(doc(db, "impact_water", "inventory"), { products: next }); setError(""); }
+    catch { setError("Couldn't save stock changes. Check your connection and try again."); }
+    finally { setSaving(false); }
   }, []);
 
   const saveOrders = useCallback(async (next) => {
     setOrders(next);
     setSaving(true);
-    try {
-      await setDoc(doc(db, "impact_water", "purchase_orders"), { orders: next });
-      setError("");
-    } catch {
-      setError("Couldn't save order changes. Check your connection and try again.");
-    } finally {
-      setSaving(false);
-    }
+    try { await setDoc(doc(db, "impact_water", "purchase_orders"), { orders: next }); setError(""); }
+    catch { setError("Couldn't save order changes. Check your connection and try again."); }
+    finally { setSaving(false); }
+  }, []);
+
+  const saveMaterials = useCallback(async (next) => {
+    setMaterials(next);
+    setSaving(true);
+    try { await setDoc(doc(db, "production", "materials"), { materials: next }); setError(""); }
+    catch { setError("Couldn't save material changes. Check your connection and try again."); }
+    finally { setSaving(false); }
+  }, []);
+
+  const saveBatches = useCallback(async (next) => {
+    setBatches(next);
+    setSaving(true);
+    try { await setDoc(doc(db, "production", "batches"), { batches: next }); setError(""); }
+    catch { setError("Couldn't save batch changes. Check your connection and try again."); }
+    finally { setSaving(false); }
   }, []);
 
   function addProduct() {
     if (!newName.trim()) return;
-    const p = {
-      id: uid(),
-      name: newName.trim(),
-      sku: newSku.trim() || newName.trim().slice(0, 3).toUpperCase(),
-      stock: Number(newStock) || 0,
-    };
+    const p = { id: uid(), name: newName.trim(), sku: newSku.trim() || newName.trim().slice(0, 3).toUpperCase(), stock: Number(newStock) || 0 };
     saveProducts([...(products || []), p]);
-    setNewName("");
-    setNewSku("");
-    setNewStock("");
-    setAddingProduct(false);
+    setNewName(""); setNewSku(""); setNewStock(""); setAddingProduct(false);
   }
-
-  function startEdit(p) {
-    setEditingId(p.id);
-    setEditValue(String(p.stock));
-  }
-
+  function startEdit(p) { setEditingId(p.id); setEditValue(String(p.stock)); }
   function commitEdit(p) {
     const val = Number(editValue);
-    if (Number.isNaN(val) || val < 0) {
-      setEditingId(null);
-      return;
-    }
-    const next = products.map((x) => (x.id === p.id ? { ...x, stock: val } : x));
-    saveProducts(next);
+    if (Number.isNaN(val) || val < 0) { setEditingId(null); return; }
+    saveProducts(products.map((x) => (x.id === p.id ? { ...x, stock: val } : x)));
     setEditingId(null);
   }
-
   function step(p, delta) {
-    const next = products.map((x) =>
-      x.id === p.id ? { ...x, stock: Math.max(0, x.stock + delta) } : x
-    );
-    saveProducts(next);
+    saveProducts(products.map((x) => (x.id === p.id ? { ...x, stock: Math.max(0, x.stock + delta) } : x)));
   }
-
   function deleteProduct(p) {
     if (!window.confirm(`Delete "${p.name}"? This won't undo.`)) return;
     saveProducts(products.filter((x) => x.id !== p.id));
+  }
+  function productById(id) { return (products || []).find((p) => p.id === id); }
+
+  function addPoLine() { setPoLines([...poLines, { id: uid(), productId: "", qty: "" }]); }
+  function removePoLine(id) { setPoLines(poLines.filter((l) => l.id !== id)); }
+  function updatePoLine(id, field, value) { setPoLines(poLines.map((l) => (l.id === id ? { ...l, [field]: value } : l))); }
+
+  function createPo() {
+    const validLines = poLines.filter((l) => l.productId && Number(l.qty) > 0);
+    if (validLines.length === 0) return;
+    const po = {
+      id: uid(), label: poLabel.trim() || `PO ${(orders?.length || 0) + 1}`, date: todayStr(), status: "pending",
+      lines: validLines.map((l) => ({ id: l.id, productId: l.productId, qtyOrdered: Number(l.qty), qtyAllocated: 0 })),
+      shipped: false,
+    };
+    saveOrders([po, ...(orders || [])]);
+    setCreatingPo(false); setPoLabel(""); setPoLines([{ id: uid(), productId: "", qty: "" }]);
   }
 
   function deleteOrder(po) {
     if (!window.confirm(`Delete order "${po.label}"? This won't undo. Stock already deducted for it will not be restored.`)) return false;
     saveOrders(orders.filter((o) => o.id !== po.id));
     return true;
-  }
-
-  function addPoLine() {
-    setPoLines([...poLines, { id: uid(), productId: "", qty: "" }]);
-  }
-
-  function removePoLine(id) {
-    setPoLines(poLines.filter((l) => l.id !== id));
-  }
-
-  function updatePoLine(id, field, value) {
-    setPoLines(poLines.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
-  }
-
-  function createPo() {
-    const validLines = poLines.filter((l) => l.productId && Number(l.qty) > 0);
-    if (validLines.length === 0) return;
-    const po = {
-      id: uid(),
-      label: poLabel.trim() || `PO ${(orders?.length || 0) + 1}`,
-      date: todayStr(),
-      status: "pending",
-      lines: validLines.map((l) => ({
-        id: l.id,
-        productId: l.productId,
-        qtyOrdered: Number(l.qty),
-        qtyAllocated: 0,
-      })),
-      shipped: false,
-    };
-    saveOrders([po, ...(orders || [])]);
-    setCreatingPo(false);
-    setPoLabel("");
-    setPoLines([{ id: uid(), productId: "", qty: "" }]);
-  }
-
-  function productById(id) {
-    return (products || []).find((p) => p.id === id);
   }
 
   function openPo(po) {
@@ -376,31 +364,102 @@ function StockPOTracker() {
     const updatedLines = po.lines.map((l) => {
       const allocated = allocDraft[l.id] || 0;
       const pIdx = nextProducts.findIndex((p) => p.id === l.productId);
-      if (pIdx > -1) {
-        nextProducts[pIdx] = {
-          ...nextProducts[pIdx],
-          stock: Math.max(0, nextProducts[pIdx].stock - allocated),
-        };
-      }
+      if (pIdx > -1) nextProducts[pIdx] = { ...nextProducts[pIdx], stock: Math.max(0, nextProducts[pIdx].stock - allocated) };
       return { ...l, qtyAllocated: allocated };
     });
     const fullyMet = updatedLines.every((l) => l.qtyAllocated >= l.qtyOrdered);
     const anyMet = updatedLines.some((l) => l.qtyAllocated > 0);
     const status = fullyMet ? "fulfilled" : anyMet ? "partial" : "pending";
-    const nextOrders = orders.map((o) =>
-      o.id === po.id ? { ...o, lines: updatedLines, status } : o
-    );
     saveProducts(nextProducts);
-    saveOrders(nextOrders);
+    saveOrders(orders.map((o) => (o.id === po.id ? { ...o, lines: updatedLines, status } : o)));
     setOpenPoId(null);
   }
 
   function toggleShipped(poId) {
-    const next = orders.map((o) => (o.id === poId ? { ...o, shipped: !o.shipped } : o));
-    saveOrders(next);
+    saveOrders(orders.map((o) => (o.id === poId ? { ...o, shipped: !o.shipped } : o)));
   }
 
-  if (products === null || orders === null) {
+  function addMaterial() {
+    if (!newMatName.trim()) return;
+    const m = { id: uid(), name: newMatName.trim(), unit: newMatUnit.trim() || "pcs", stock: Number(newMatStock) || 0 };
+    saveMaterials([...(materials || []), m]);
+    setNewMatName(""); setNewMatUnit(""); setNewMatStock(""); setAddingMaterial(false);
+  }
+  function startMatEdit(m) { setEditingMatId(m.id); setEditMatValue(String(m.stock)); }
+  function commitMatEdit(m) {
+    const val = Number(editMatValue);
+    if (Number.isNaN(val) || val < 0) { setEditingMatId(null); return; }
+    saveMaterials(materials.map((x) => (x.id === m.id ? { ...x, stock: val } : x)));
+    setEditingMatId(null);
+  }
+  function stepMaterial(m, delta) {
+    saveMaterials(materials.map((x) => (x.id === m.id ? { ...x, stock: Math.max(0, x.stock + delta) } : x)));
+  }
+  function deleteMaterial(m) {
+    if (!window.confirm(`Delete "${m.name}"? This won't undo.`)) return;
+    saveMaterials(materials.filter((x) => x.id !== m.id));
+  }
+  function materialById(id) { return (materials || []).find((m) => m.id === id); }
+
+  function createBatch() {
+    if (!batchProduct.trim() || !Number(batchQty)) return;
+    const b = {
+      id: uid(), product: batchProduct.trim(), plannedQty: Number(batchQty), date: todayStr(), status: "planned",
+      materialsUsed: [], finishedQty: null,
+      qc: DEFAULT_QC_CHECKS.map((label) => ({ id: uid(), label, passed: null, note: "" })),
+      completedAt: null,
+    };
+    saveBatches([b, ...(batches || [])]);
+    setCreatingBatch(false); setBatchProduct(""); setBatchQty("");
+  }
+
+  function deleteBatch(b) {
+    if (!window.confirm(`Delete batch "${b.product}"? This won't undo. Materials already deducted will not be restored.`)) return false;
+    saveBatches(batches.filter((x) => x.id !== b.id));
+    return true;
+  }
+
+  function openBatch(b) {
+    setOpenBatchId(b.id);
+    setMatLines(b.materialsUsed.length > 0
+      ? b.materialsUsed.map((l) => ({ id: l.id, materialId: l.materialId, qty: String(l.qty) }))
+      : [{ id: uid(), materialId: "", qty: "" }]);
+    setQcDraft(b.qc.map((c) => ({ ...c })));
+    setFinishedQty(b.finishedQty != null ? String(b.finishedQty) : "");
+  }
+
+  function addMatLine() { setMatLines([...matLines, { id: uid(), materialId: "", qty: "" }]); }
+  function removeMatLine(id) { setMatLines(matLines.filter((l) => l.id !== id)); }
+  function updateMatLine(id, field, value) { setMatLines(matLines.map((l) => (l.id === id ? { ...l, [field]: value } : l))); }
+  function setQcResult(checkId, passed) { setQcDraft(qcDraft.map((c) => (c.id === checkId ? { ...c, passed } : c))); }
+  function setQcNote(checkId, note) { setQcDraft(qcDraft.map((c) => (c.id === checkId ? { ...c, note } : c))); }
+  function qcOverallResult(qc) {
+    if (qc.some((c) => c.passed === false)) return "fail";
+    if (qc.every((c) => c.passed === true)) return "pass";
+    return "pending";
+  }
+
+  function completeBatch() {
+    const b = batches.find((x) => x.id === openBatchId);
+    if (!b) return;
+    const validLines = matLines.filter((l) => l.materialId && Number(l.qty) > 0);
+    const nextMaterials = [...materials];
+    validLines.forEach((l) => {
+      const idx = nextMaterials.findIndex((m) => m.id === l.materialId);
+      if (idx > -1) nextMaterials[idx] = { ...nextMaterials[idx], stock: Math.max(0, nextMaterials[idx].stock - Number(l.qty)) };
+    });
+    const nextBatch = {
+      ...b, status: "completed",
+      materialsUsed: validLines.map((l) => ({ id: l.id, materialId: l.materialId, qty: Number(l.qty) })),
+      qc: qcDraft, finishedQty: Number(finishedQty) || 0, completedAt: todayStr(),
+    };
+    saveMaterials(nextMaterials);
+    saveBatches(batches.map((x) => (x.id === b.id ? nextBatch : x)));
+    setOpenBatchId(null);
+  }
+
+  const loading = products === null || orders === null || materials === null || batches === null;
+  if (loading) {
     return (
       <div style={{ background: PAPER, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Loader2 size={22} style={{ color: TEAL, animation: "spin 1s linear infinite" }} />
@@ -410,6 +469,14 @@ function StockPOTracker() {
   }
 
   const openPo_ = openPoId ? orders.find((o) => o.id === openPoId) : null;
+  const openBatch_ = openBatchId ? batches.find((b) => b.id === openBatchId) : null;
+
+  const tabBtn = (active) => ({
+    flex: 1, padding: "9px 0", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 600,
+    background: active ? CARD : "transparent", color: active ? TEAL_DARK : "#5C726D",
+    boxShadow: active ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+  });
 
   return (
     <div style={{ background: PAPER, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: INK, maxWidth: 480, margin: "0 auto", paddingBottom: 24 }}>
@@ -418,8 +485,8 @@ function StockPOTracker() {
           <path d="M0,10 C50,22 100,0 150,10 C200,20 250,2 300,10 C350,18 380,6 400,10 L400,22 L0,22 Z" fill={PAPER} />
         </svg>
         <div style={{ fontSize: 12, letterSpacing: 0.3, color: "#BFE3DE", marginBottom: 2 }}>Impact Water Co</div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>Stock &amp; Orders</div>
-        {saving && <div style={{ fontSize: 11, color: "#BFE3DE", marginTop: 4 }}>Saving…</div>}
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>{section === "sales" ? "Stock & Orders" : "Production"}</div>
+        {saving && <div style={{ fontSize: 11, color: "#BFE3DE", marginTop: 4 }}>Saving...</div>}
       </div>
 
       {error && (
@@ -429,34 +496,36 @@ function StockPOTracker() {
         </div>
       )}
 
-      <div style={{ display: "flex", margin: "14px 16px 6px", background: "#E7EFED", borderRadius: 10, padding: 3 }}>
-        <button
-          onClick={() => setTab("stock")}
-          style={{
-            flex: 1, padding: "9px 0", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 600,
-            background: tab === "stock" ? CARD : "transparent",
-            color: tab === "stock" ? TEAL_DARK : "#5C726D",
-            boxShadow: tab === "stock" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
-          }}
-        >
-          <Package size={15} /> Stock
+      <div style={{ display: "flex", margin: "14px 16px 8px", background: "#E7EFED", borderRadius: 10, padding: 3 }}>
+        <button onClick={() => setSection("sales")} style={tabBtn(section === "sales")}>
+          <ShoppingBag size={15} /> Sales
         </button>
-        <button
-          onClick={() => setTab("orders")}
-          style={{
-            flex: 1, padding: "9px 0", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 600,
-            background: tab === "orders" ? CARD : "transparent",
-            color: tab === "orders" ? TEAL_DARK : "#5C726D",
-            boxShadow: tab === "orders" ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
-          }}
-        >
-          <ClipboardList size={15} /> Orders
+        <button onClick={() => setSection("production")} style={tabBtn(section === "production")}>
+          <Factory size={15} /> Production
         </button>
       </div>
 
-      {tab === "stock" && (
+      {section === "sales" ? (
+        <div style={{ display: "flex", margin: "0 16px 6px", gap: 6 }}>
+          <button onClick={() => setSalesTab("stock")} style={{ ...tabBtn(salesTab === "stock"), background: salesTab === "stock" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
+            <Package size={13} /> Stock
+          </button>
+          <button onClick={() => setSalesTab("orders")} style={{ ...tabBtn(salesTab === "orders"), background: salesTab === "orders" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
+            <ClipboardList size={13} /> Orders
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", margin: "0 16px 6px", gap: 6 }}>
+          <button onClick={() => setProdTab("batches")} style={{ ...tabBtn(prodTab === "batches"), background: prodTab === "batches" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
+            <ClipboardCheck size={13} /> Batches
+          </button>
+          <button onClick={() => setProdTab("materials")} style={{ ...tabBtn(prodTab === "materials"), background: prodTab === "materials" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
+            <Boxes size={13} /> Materials
+          </button>
+        </div>
+      )}
+
+      {section === "sales" && salesTab === "stock" && (
         <div style={{ padding: "8px 16px 0" }}>
           {(products || []).length === 0 && !addingProduct && (
             <div style={{ textAlign: "center", padding: "40px 12px", color: "#6B7D79" }}>
@@ -464,7 +533,6 @@ function StockPOTracker() {
               <div style={{ fontSize: 14 }}>No products yet. Add your first SKU to start tracking stock.</div>
             </div>
           )}
-
           {(products || []).map((p) => (
             <div key={p.id} style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -473,44 +541,26 @@ function StockPOTracker() {
                   <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 1 }}>{p.sku}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button
-                    onClick={() => step(p, -1)}
-                    style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                  >
+                  <button onClick={() => step(p, -1)} style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                     <Minus size={14} color={TEAL_DARK} />
                   </button>
                   {editingId === p.id ? (
-                    <input
-                      autoFocus
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => commitEdit(p)}
-                      onKeyDown={(e) => e.key === "Enter" && commitEdit(p)}
-                      inputMode="numeric"
-                      style={{ width: 52, textAlign: "center", fontSize: 15, fontWeight: 700, border: `1px solid ${TEAL}`, borderRadius: 8, padding: "5px 0" }}
-                    />
+                    <input autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => commitEdit(p)} onKeyDown={(e) => e.key === "Enter" && commitEdit(p)} inputMode="numeric"
+                      style={{ width: 52, textAlign: "center", fontSize: 15, fontWeight: 700, border: `1px solid ${TEAL}`, borderRadius: 8, padding: "5px 0" }} />
                   ) : (
-                    <div onClick={() => startEdit(p)} style={{ width: 52, textAlign: "center", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
-                      {p.stock}
-                    </div>
+                    <div onClick={() => startEdit(p)} style={{ width: 52, textAlign: "center", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>{p.stock}</div>
                   )}
-                  <button
-                    onClick={() => step(p, 1)}
-                    style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                  >
+                  <button onClick={() => step(p, 1)} style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                     <Plus size={14} color={TEAL_DARK} />
                   </button>
-                  <button
-                    onClick={() => deleteProduct(p)}
-                    style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginLeft: 2 }}
-                  >
+                  <button onClick={() => deleteProduct(p)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginLeft: 2 }}>
                     <Trash2 size={14} color="#B7C3C0" />
                   </button>
                 </div>
               </div>
             </div>
           ))}
-
           {addingProduct ? (
             <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>New product</div>
@@ -536,7 +586,7 @@ function StockPOTracker() {
         </div>
       )}
 
-      {tab === "orders" && !openPo_ && (
+      {section === "sales" && salesTab === "orders" && !openPo_ && (
         <div style={{ padding: "8px 16px 0" }}>
           {(orders || []).length === 0 && !creatingPo && (
             <div style={{ textAlign: "center", padding: "40px 12px", color: "#6B7D79" }}>
@@ -544,21 +594,17 @@ function StockPOTracker() {
               <div style={{ fontSize: 14 }}>No purchase orders yet.</div>
             </div>
           )}
-
           {(orders || []).map((po) => {
             const statusColor = po.status === "fulfilled" ? GOOD : po.status === "partial" ? RUST : "#8A9A96";
             const statusLabel = po.status === "fulfilled" ? "Fulfilled" : po.status === "partial" ? "Partial" : "Pending";
             return (
-              <div key={po.id}
-                style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div key={po.id} style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <button onClick={() => openPo(po)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{po.label}</div>
-                  <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 2 }}>{po.date} · {po.lines.length} item{po.lines.length !== 1 ? "s" : ""}</div>
+                  <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 2 }}>{po.date} - {po.lines.length} item{po.lines.length !== 1 ? "s" : ""}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                     <span style={{ fontSize: 11, color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
-                    {po.shipped && (
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: TEAL_DARK, background: "#DCEFEC", borderRadius: 5, padding: "2px 6px" }}>Shipped</span>
-                    )}
+                    {po.shipped && <span style={{ fontSize: 10.5, fontWeight: 700, color: TEAL_DARK, background: "#DCEFEC", borderRadius: 5, padding: "2px 6px" }}>Shipped</span>}
                   </div>
                 </button>
                 <button onClick={() => deleteOrder(po)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 6 }}>
@@ -570,21 +616,17 @@ function StockPOTracker() {
               </div>
             );
           })}
-
           {creatingPo ? (
             <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>New purchase order</div>
               <input placeholder="PO name / customer" value={poLabel} onChange={(e) => setPoLabel(e.target.value)}
                 style={{ width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, marginBottom: 10, boxSizing: "border-box" }} />
-
               {poLines.map((line) => (
                 <div key={line.id} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
                   <select value={line.productId} onChange={(e) => updatePoLine(line.id, "productId", e.target.value)}
                     style={{ flex: 1, padding: "9px 8px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fff" }}>
                     <option value="">Select product</option>
-                    {(products || []).map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
+                    {(products || []).map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
                   </select>
                   <input placeholder="Qty" value={line.qty} onChange={(e) => updatePoLine(line.id, "qty", e.target.value)} inputMode="numeric"
                     style={{ width: 64, padding: "9px 8px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }} />
@@ -598,7 +640,6 @@ function StockPOTracker() {
               <button onClick={addPoLine} style={{ background: "transparent", border: "none", color: TEAL_DARK, fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", padding: "4px 0 10px" }}>
                 <Plus size={13} /> Add line
               </button>
-
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={createPo} style={{ flex: 1, background: TEAL, color: "#fff", border: "none", borderRadius: 8, padding: "9px 0", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>Save order</button>
                 <button onClick={() => { setCreatingPo(false); setPoLines([{ id: uid(), productId: "", qty: "" }]); }} style={{ padding: "9px 14px", background: "transparent", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
@@ -616,7 +657,7 @@ function StockPOTracker() {
         </div>
       )}
 
-      {tab === "orders" && openPo_ && (
+      {section === "sales" && salesTab === "orders" && openPo_ && (
         <div style={{ padding: "8px 16px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <button onClick={() => setOpenPoId(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: TEAL_DARK, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
@@ -626,30 +667,24 @@ function StockPOTracker() {
               <Trash2 size={14} /> Delete
             </button>
           </div>
-
           <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>{openPo_.label}</div>
           <div style={{ fontSize: 12, color: "#7C8F8B", marginBottom: 10 }}>{openPo_.date}</div>
-
           <button onClick={() => toggleShipped(openPo_.id)} style={{
             width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            border: `1.5px solid ${openPo_.shipped ? GOOD : LINE}`,
-            background: openPo_.shipped ? "#E8F3EC" : "#fff",
-            color: openPo_.shipped ? GOOD : "#5C726D",
-            borderRadius: 10, padding: "9px 0", fontSize: 13.5, fontWeight: 600, marginBottom: 14, cursor: "pointer",
+            border: `1.5px solid ${openPo_.shipped ? GOOD : LINE}`, background: openPo_.shipped ? "#E8F3EC" : "#fff",
+            color: openPo_.shipped ? GOOD : "#5C726D", borderRadius: 10, padding: "9px 0", fontSize: 13.5, fontWeight: 600, marginBottom: 14, cursor: "pointer",
           }}>
             {openPo_.shipped ? <><Check size={15} /> Shipped</> : "Mark as shipped"}
           </button>
-
           {openPo_.status === "pending" ? (
             <button onClick={autoAllocateAll} style={{ width: "100%", background: TEAL, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontSize: 13.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
               Auto-allocate from available stock
             </button>
           ) : (
             <div style={{ background: openPo_.status === "fulfilled" ? "#E8F3EC" : "#FBEAE3", color: openPo_.status === "fulfilled" ? GOOD : RUST, fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "8px 12px", marginBottom: 14 }}>
-              {openPo_.status === "fulfilled" ? "Fully allocated and deducted from stock." : "Partially allocated — some lines fell short of stock."}
+              {openPo_.status === "fulfilled" ? "Fully allocated and deducted from stock." : "Partially allocated, some lines fell short of stock."}
             </div>
           )}
-
           {openPo_.lines.map((l) => {
             const prod = productById(l.productId);
             const available = prod ? prod.stock : 0;
@@ -664,20 +699,12 @@ function StockPOTracker() {
                   <div style={{ fontSize: 12, color: "#7C8F8B" }}>Ordered {l.qtyOrdered}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 12, color: "#7C8F8B" }}>
-                    In stock: {locked ? available + allocated : available}
-                  </div>
+                  <div style={{ fontSize: 12, color: "#7C8F8B" }}>In stock: {locked ? available + allocated : available}</div>
                   {locked ? (
-                    <div style={{ fontSize: 13, fontWeight: 700, color: short ? RUST : GOOD }}>
-                      {allocated} allocated
-                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: short ? RUST : GOOD }}>{allocated} allocated</div>
                   ) : (
-                    <input
-                      value={allocDraft[l.id] ?? 0}
-                      onChange={(e) => setLineAlloc(l.id, l.productId, e.target.value)}
-                      inputMode="numeric"
-                      style={{ width: 56, textAlign: "center", padding: "6px 0", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 14, fontWeight: 700 }}
-                    />
+                    <input value={allocDraft[l.id] ?? 0} onChange={(e) => setLineAlloc(l.id, l.productId, e.target.value)} inputMode="numeric"
+                      style={{ width: 56, textAlign: "center", padding: "6px 0", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 14, fontWeight: 700 }} />
                   )}
                 </div>
                 {!locked && (
@@ -693,10 +720,225 @@ function StockPOTracker() {
               </div>
             );
           })}
-
           {openPo_.status === "pending" && (
             <button onClick={confirmAllocation} style={{ width: "100%", background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 600, marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer" }}>
-              <Check size={15} /> Confirm &amp; deduct from stock
+              <Check size={15} /> Confirm and deduct from stock
+            </button>
+          )}
+        </div>
+      )}
+
+      {section === "production" && prodTab === "materials" && (
+        <div style={{ padding: "8px 16px 0" }}>
+          {(materials || []).length === 0 && !addingMaterial && (
+            <div style={{ textAlign: "center", padding: "40px 12px", color: "#6B7D79" }}>
+              <Boxes size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
+              <div style={{ fontSize: 14 }}>No raw materials yet. Add cartons, caps, water, etc.</div>
+            </div>
+          )}
+          {(materials || []).map((m) => (
+            <div key={m.id} style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>{m.name}</div>
+                  <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 1 }}>unit: {m.unit}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => stepMaterial(m, -1)} style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                    <Minus size={14} color={TEAL_DARK} />
+                  </button>
+                  {editingMatId === m.id ? (
+                    <input autoFocus value={editMatValue} onChange={(e) => setEditMatValue(e.target.value)}
+                      onBlur={() => commitMatEdit(m)} onKeyDown={(e) => e.key === "Enter" && commitMatEdit(m)} inputMode="numeric"
+                      style={{ width: 56, textAlign: "center", fontSize: 15, fontWeight: 700, border: `1px solid ${TEAL}`, borderRadius: 8, padding: "5px 0" }} />
+                  ) : (
+                    <div onClick={() => startMatEdit(m)} style={{ width: 56, textAlign: "center", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>{m.stock}</div>
+                  )}
+                  <button onClick={() => stepMaterial(m, 1)} style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${LINE}`, background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                    <Plus size={14} color={TEAL_DARK} />
+                  </button>
+                  <button onClick={() => deleteMaterial(m)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginLeft: 2 }}>
+                    <Trash2 size={14} color="#B7C3C0" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {addingMaterial ? (
+            <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>New material</div>
+              <input placeholder="Name (e.g. 500ml cartons)" value={newMatName} onChange={(e) => setNewMatName(e.target.value)}
+                style={{ width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, marginBottom: 8, boxSizing: "border-box" }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <input placeholder="Unit (pcs, L, kg...)" value={newMatUnit} onChange={(e) => setNewMatUnit(e.target.value)}
+                  style={{ flex: 1, padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, boxSizing: "border-box" }} />
+                <input placeholder="Starting stock" value={newMatStock} onChange={(e) => setNewMatStock(e.target.value)} inputMode="numeric"
+                  style={{ width: 110, padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={addMaterial} style={{ flex: 1, background: TEAL, color: "#fff", border: "none", borderRadius: 8, padding: "9px 0", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>Add material</button>
+                <button onClick={() => setAddingMaterial(false)} style={{ padding: "9px 14px", background: "transparent", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setAddingMaterial(true)}
+              style={{ width: "100%", padding: "11px 0", border: `1.5px dashed ${LINE}`, borderRadius: 12, background: "transparent", color: TEAL_DARK, fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer", marginBottom: 12 }}>
+              <Plus size={15} /> Add material
+            </button>
+          )}
+        </div>
+      )}
+
+      {section === "production" && prodTab === "batches" && !openBatch_ && (
+        <div style={{ padding: "8px 16px 0" }}>
+          {(batches || []).length === 0 && !creatingBatch && (
+            <div style={{ textAlign: "center", padding: "40px 12px", color: "#6B7D79" }}>
+              <ClipboardCheck size={26} style={{ marginBottom: 8, opacity: 0.5 }} />
+              <div style={{ fontSize: 14 }}>No production batches yet.</div>
+            </div>
+          )}
+          {(batches || []).map((b) => {
+            const completed = b.status === "completed";
+            const qcResult = completed ? qcOverallResult(b.qc) : null;
+            const qcColor = qcResult === "pass" ? GOOD : qcResult === "fail" ? RUST : AMBER;
+            const qcLabel = qcResult === "pass" ? "QC passed" : qcResult === "fail" ? "QC failed" : "QC pending";
+            return (
+              <div key={b.id} style={{ width: "100%", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button onClick={() => openBatch(b)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>{b.product}</div>
+                  <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 2 }}>{b.date} - planned {b.plannedQty}{completed ? ` - made ${b.finishedQty}` : ""}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: completed ? GOOD : "#8A9A96" }}>{completed ? "Completed" : "Scheduled"}</span>
+                    {completed && <span style={{ fontSize: 11, fontWeight: 600, color: qcColor }}>- {qcLabel}</span>}
+                  </div>
+                </button>
+                <button onClick={() => deleteBatch(b)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 6 }}>
+                  <Trash2 size={15} color="#B7C3C0" />
+                </button>
+                <button onClick={() => openBatch(b)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 4 }}>
+                  <ChevronRight size={17} color="#9BA9A5" />
+                </button>
+              </div>
+            );
+          })}
+          {creatingBatch ? (
+            <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Schedule a batch</div>
+              <input placeholder="Product (e.g. 6-pack 500ml)" value={batchProduct} onChange={(e) => setBatchProduct(e.target.value)}
+                style={{ width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, marginBottom: 8, boxSizing: "border-box" }} />
+              <input placeholder="Planned quantity" value={batchQty} onChange={(e) => setBatchQty(e.target.value)} inputMode="numeric"
+                style={{ width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, marginBottom: 10, boxSizing: "border-box" }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={createBatch} style={{ flex: 1, background: TEAL, color: "#fff", border: "none", borderRadius: 8, padding: "9px 0", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>Save batch</button>
+                <button onClick={() => setCreatingBatch(false)} style={{ padding: "9px 14px", background: "transparent", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setCreatingBatch(true)}
+              style={{ width: "100%", padding: "11px 0", border: `1.5px dashed ${LINE}`, borderRadius: 12, background: "transparent", color: TEAL_DARK, fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer", marginBottom: 12 }}>
+              <Plus size={15} /> Schedule new batch
+            </button>
+          )}
+        </div>
+      )}
+
+      {section === "production" && prodTab === "batches" && openBatch_ && (
+        <div style={{ padding: "8px 16px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <button onClick={() => setOpenBatchId(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: TEAL_DARK, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
+              <ChevronLeft size={16} /> Batches
+            </button>
+            <button onClick={() => { if (deleteBatch(openBatch_)) setOpenBatchId(null); }} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: RUST, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: "6px 0 10px" }}>
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>{openBatch_.product}</div>
+          <div style={{ fontSize: 12, color: "#7C8F8B", marginBottom: 14 }}>{openBatch_.date} - planned {openBatch_.plannedQty}</div>
+          {openBatch_.status === "completed" && (
+            <div style={{ background: "#E8F3EC", color: GOOD, fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "8px 12px", marginBottom: 14 }}>
+              Completed {openBatch_.completedAt} - {openBatch_.finishedQty} produced
+            </div>
+          )}
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Materials used</div>
+          {openBatch_.status === "planned" ? (
+            <>
+              {matLines.map((line) => (
+                <div key={line.id} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                  <select value={line.materialId} onChange={(e) => updateMatLine(line.id, "materialId", e.target.value)}
+                    style={{ flex: 1, padding: "9px 8px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fff" }}>
+                    <option value="">Select material</option>
+                    {(materials || []).map((m) => (<option key={m.id} value={m.id}>{m.name} ({m.stock} {m.unit} avail.)</option>))}
+                  </select>
+                  <input placeholder="Qty" value={line.qty} onChange={(e) => updateMatLine(line.id, "qty", e.target.value)} inputMode="numeric"
+                    style={{ width: 64, padding: "9px 8px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box" }} />
+                  {matLines.length > 1 && (
+                    <button onClick={() => removeMatLine(line.id)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 4 }}>
+                      <X size={15} color="#9BA9A5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button onClick={addMatLine} style={{ background: "transparent", border: "none", color: TEAL_DARK, fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", padding: "4px 0 14px" }}>
+                <Plus size={13} /> Add material line
+              </button>
+            </>
+          ) : (
+            <div style={{ marginBottom: 14 }}>
+              {openBatch_.materialsUsed.length === 0 && <div style={{ fontSize: 12.5, color: "#8A9A96" }}>None recorded</div>}
+              {openBatch_.materialsUsed.map((l) => {
+                const m = materialById(l.materialId);
+                return (
+                  <div key={l.id} style={{ fontSize: 13, color: INK, marginBottom: 4 }}>
+                    {m ? m.name : "Unknown"} - {l.qty} {m ? m.unit : ""}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Quality check</div>
+          {(openBatch_.status === "planned" ? qcDraft : openBatch_.qc).map((c) => {
+            const locked = openBatch_.status !== "planned";
+            const Icon = c.passed === true ? CheckCircle2 : c.passed === false ? XCircle : CircleDashed;
+            const color = c.passed === true ? GOOD : c.passed === false ? RUST : "#9BA9A5";
+            return (
+              <div key={c.id} style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Icon size={16} color={color} />
+                    <span style={{ fontSize: 13.5 }}>{c.label}</span>
+                  </div>
+                  {!locked && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setQcResult(c.id, true)}
+                        style={{ padding: "4px 10px", borderRadius: 7, border: `1px solid ${c.passed === true ? GOOD : LINE}`, background: c.passed === true ? "#E8F3EC" : "#fff", color: c.passed === true ? GOOD : "#7C8F8B", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                        Pass
+                      </button>
+                      <button onClick={() => setQcResult(c.id, false)}
+                        style={{ padding: "4px 10px", borderRadius: 7, border: `1px solid ${c.passed === false ? RUST : LINE}`, background: c.passed === false ? "#FBEAE3" : "#fff", color: c.passed === false ? RUST : "#7C8F8B", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                        Fail
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {!locked ? (
+                  <input placeholder="Note (optional)" value={c.note} onChange={(e) => setQcNote(c.id, e.target.value)}
+                    style={{ width: "100%", marginTop: 8, padding: "6px 8px", border: `1px solid ${LINE}`, borderRadius: 6, fontSize: 12, boxSizing: "border-box" }} />
+                ) : (
+                  c.note && <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 6 }}>{c.note}</div>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 8 }}>Finished quantity produced</div>
+          {openBatch_.status === "planned" ? (
+            <input placeholder="0" value={finishedQty} onChange={(e) => setFinishedQty(e.target.value)} inputMode="numeric"
+              style={{ width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 14, fontWeight: 700, marginBottom: 16, boxSizing: "border-box" }} />
+          ) : (
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>{openBatch_.finishedQty}</div>
+          )}
+          {openBatch_.status === "planned" && (
+            <button onClick={completeBatch} style={{ width: "100%", background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer" }}>
+              <Check size={15} /> Complete batch
             </button>
           )}
         </div>
