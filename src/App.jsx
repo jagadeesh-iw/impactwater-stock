@@ -5,7 +5,9 @@ import {
   Plus, Minus, Package, ClipboardList, ChevronRight, ChevronLeft, X, Check,
   AlertTriangle, Loader2, Lock, Trash2, MessageCircle, Send, Boxes,
   ClipboardCheck, CheckCircle2, XCircle, CircleDashed, ShoppingBag, Factory,
+  Receipt,
 } from "lucide-react";
+import BillingSection from "./Billing";
 
 const TEAL = "#0E6B64";
 const TEAL_DARK = "#0A4F4A";
@@ -478,14 +480,16 @@ function MainApp() {
     display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
   });
 
+  const sectionTitle = section === "sales" ? "Stock & Orders" : section === "production" ? "Production" : "Billing";
+
   return (
-    <div style={{ background: PAPER, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: INK, maxWidth: 480, margin: "0 auto", paddingBottom: 24 }}>
+    <div className="shell" style={{ background: PAPER, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: INK, paddingBottom: 24 }}>
       <div style={{ background: TEAL, padding: "22px 18px 30px", position: "relative", overflow: "hidden" }}>
         <svg style={{ position: "absolute", bottom: -1, left: 0, width: "100%", height: 22 }} viewBox="0 0 400 22" preserveAspectRatio="none">
           <path d="M0,10 C50,22 100,0 150,10 C200,20 250,2 300,10 C350,18 380,6 400,10 L400,22 L0,22 Z" fill={PAPER} />
         </svg>
         <div style={{ fontSize: 12, letterSpacing: 0.3, color: "#BFE3DE", marginBottom: 2 }}>Impact Water Co</div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>{section === "sales" ? "Stock & Orders" : "Production"}</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>{sectionTitle}</div>
         {saving && <div style={{ fontSize: 11, color: "#BFE3DE", marginTop: 4 }}>Saving...</div>}
       </div>
 
@@ -503,9 +507,12 @@ function MainApp() {
         <button onClick={() => setSection("production")} style={tabBtn(section === "production")}>
           <Factory size={15} /> Production
         </button>
+        <button onClick={() => setSection("billing")} style={tabBtn(section === "billing")}>
+          <Receipt size={15} /> Billing
+        </button>
       </div>
 
-      {section === "sales" ? (
+      {section === "sales" && (
         <div style={{ display: "flex", margin: "0 16px 6px", gap: 6 }}>
           <button onClick={() => setSalesTab("stock")} style={{ ...tabBtn(salesTab === "stock"), background: salesTab === "stock" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
             <Package size={13} /> Stock
@@ -514,7 +521,8 @@ function MainApp() {
             <ClipboardList size={13} /> Orders
           </button>
         </div>
-      ) : (
+      )}
+      {section === "production" && (
         <div style={{ display: "flex", margin: "0 16px 6px", gap: 6 }}>
           <button onClick={() => setProdTab("batches")} style={{ ...tabBtn(prodTab === "batches"), background: prodTab === "batches" ? "#DCEFEC" : "transparent", boxShadow: "none", borderRadius: 20, padding: "6px 0" }}>
             <ClipboardCheck size={13} /> Batches
@@ -533,8 +541,9 @@ function MainApp() {
               <div style={{ fontSize: 14 }}>No products yet. Add your first SKU to start tracking stock.</div>
             </div>
           )}
+          <div className="grid-cards" style={{ marginBottom: (products || []).length ? 10 : 0 }}>
           {(products || []).map((p) => (
-            <div key={p.id} style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
+            <div key={p.id} className="card-anim" style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{p.name}</div>
@@ -561,6 +570,7 @@ function MainApp() {
               </div>
             </div>
           ))}
+          </div>
           {addingProduct ? (
             <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>New product</div>
@@ -594,11 +604,12 @@ function MainApp() {
               <div style={{ fontSize: 14 }}>No purchase orders yet.</div>
             </div>
           )}
+          <div className="grid-cards" style={{ marginBottom: (orders || []).length ? 10 : 0 }}>
           {(orders || []).map((po) => {
             const statusColor = po.status === "fulfilled" ? GOOD : po.status === "partial" ? RUST : "#8A9A96";
             const statusLabel = po.status === "fulfilled" ? "Fulfilled" : po.status === "partial" ? "Partial" : "Pending";
             return (
-              <div key={po.id} style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div key={po.id} className="card-anim" style={{ width: "100%", textAlign: "left", background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <button onClick={() => openPo(po)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{po.label}</div>
                   <div style={{ fontSize: 11.5, color: "#7C8F8B", marginTop: 2 }}>{po.date} - {po.lines.length} item{po.lines.length !== 1 ? "s" : ""}</div>
@@ -616,6 +627,7 @@ function MainApp() {
               </div>
             );
           })}
+          </div>
           {creatingPo ? (
             <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>New purchase order</div>
@@ -941,6 +953,12 @@ function MainApp() {
               <Check size={15} /> Complete batch
             </button>
           )}
+        </div>
+      )}
+
+      {section === "billing" && (
+        <div style={{ padding: "8px 16px 0" }}>
+          <BillingSection />
         </div>
       )}
     </div>
